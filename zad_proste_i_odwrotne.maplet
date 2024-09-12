@@ -1,0 +1,350 @@
+
+restart:
+with(Maplets[Elements]):
+with(Maplets[Tools]):
+with(plots):
+
+macierzA := proc(theta, lambda, l, alpha) # funkcja zwracaj¹ca macierz przejscia D-H z ukladu i-1 do i
+	return Matrix(4, 4,[
+		[cos(theta), -sin(theta)*cos(alpha), sin(theta)*sin(alpha), l*cos(theta)],
+		[sin(theta), cos(theta)*cos(alpha), -cos(theta)*sin(alpha), l*sin(theta)],
+		[0, sin(alpha), cos(alpha), lambda],
+		[0, 0, 0, 1]
+	]);
+end proc:
+
+zmiana_widocznosci_pol := proc()	#pobiera wybran¹ iloœæ ogniw (n) i w³¹cza/wy³¹cza dane pola edycyjne
+	local i;
+	global n;
+	n := Get(pole_ilosc_ogniw(value)::posint);
+	for i from 1 to 6 do
+		if n>=i then
+			if Get(pole_typ_ogniwa[i](value))="R" then	#jesli para obrotowa
+				Set(pole_theta[i](visible)=false);
+				Set(pole_lambda[i](visible)=true);
+				Set(J||i||_opis(caption)=theta||i);
+			else										#jesli para przesuwna
+				Set(pole_theta[i](visible)=true);
+				Set(pole_lambda[i](visible)=false);
+				Set(J||i||_opis(caption)=lambda||i);
+			end if;
+			
+			Set(pole_l[i](visible)=true);
+			Set(pole_alpha[i](visible)=true);
+			Set(pole_nr_ogniwa[i](visible)=true);
+			Set(pole_typ_ogniwa[i](visible)=true);
+			
+			Set(J||i(visible)=true);
+			Set(J||i||_opis(visible)=true);
+			Set(J||i||_minus(visible)=true);
+			Set(J||i||_plus(visible)=true);
+			
+		else
+			Set(pole_theta[i](visible)=false);
+			Set(pole_lambda[i](visible)=false);
+			Set(pole_l[i](visible)=false);
+			Set(pole_alpha[i](visible)=false);
+			Set(pole_nr_ogniwa[i](visible)=false);
+			Set(pole_typ_ogniwa[i](visible)=false);
+			
+			Set(J||i(visible)=false);
+			Set(J||i||_opis(visible)=false);
+			Set(J||i||_minus(visible)=false);
+			Set(J||i||_plus(visible)=false);
+		end if;
+	end do;
+end proc:
+
+generowanie_wykresu := proc(punkty)
+	local ilosc_punktow, max_punkt, widok_wykresu;
+	
+	ilosc_punktow := nops(punkty);
+	max_punkt := max(abs(min(punkty)),abs(max(punkty))); # najdalszy punkt - do wyliczenia zakresu widoku wykresu
+	widok_wykresu := [(-max_punkt..max_punkt)$3];
+	
+	return display([
+		pointplot3d( # szkielet manipulatora
+			punkty, # ³¹czenia miêdzy wszystkimi ogniwami
+			labels=["x", "y", "z"],
+			color=black,
+			style=line,
+			linestyle=solid,
+			thickness=3,
+			symbol=solidsphere,
+			symbolsize=15,
+			axes=boxed,
+			axis=[color=blue, location=low, thickness=0, tickmarks],
+			scaling=constrained,
+			view=widok_wykresu,
+			orientation=[245,75,0]
+		),
+		pointplot3d( # ogniwa manipulatora
+			[seq(punkty[i], i=1..ilosc_punktow-1, 2)], # nieparzyste punkty - pary kinematyczne
+			color=red,
+			style=point,
+			symbol=solidsphere,
+			symbolsize=15
+		),
+		pointplot3d( # chwytak/koñcówka manipulatora
+			punkty[ilosc_punktow], # ostatni punkt - chwytak
+			color=red,
+			style=point,
+			symbol=solidsphere,
+			symbolsize=20
+		),
+		plottools[cylinder](punkty[1], max_punkt/5, 0) # pierwszy punkt - podstawa
+	]);
+end proc:
+
+oblicz_zad_proste := proc()
+	local A, n, i, theta, lambda, l, alpha, punkty;
+
+	A[0,0] := Matrix(4, shape=identity); # wyliczenie bazowej macierzy przejœæ (jednostkowa)
+	
+	n := Get(pole_ilosc_ogniw(value)::posint); # pobranie iloœci ogniw
+	for i from 1 to n do
+		if Get(pole_typ_ogniwa[i](value))="R" then
+			theta[i]	:= Get(J||i::algebraic, corrections=true, update=true)*Pi/180;
+			lambda[i]	:= Get(pole_lambda[i]::algebraic, corrections=true, update=true);
+		else
+			theta[i]	:= Get(pole_theta[i]::algebraic, corrections=true, update=true)*Pi/180;
+			lambda[i]	:= Get(J||i::algebraic, corrections=true, update=true);
+		end if;
+		l[i]			:= Get(pole_l[i]::algebraic, corrections=true, update=true);
+		alpha[i]		:= Get(pole_alpha[i]::algebraic, corrections=true, update=true)*Pi/180;
+		
+		A[i-1,i] := evalf(macierzA(theta[i], lambda[i], l[i], alpha[i])); # wyliczanie kolejnych macierzy przejœæ
+		A[0,i] := A[0,i-1] . A[i-1,i];
+		A[0,i,'lambda'] := A[0,i-1] . evalf(macierzA(0, lambda[i], 0, 0));
+	end do;
+	
+	Set( # wpisanie wartoœci wynikowych do pól (z zaokr¹gleniem)
+		'X'=evalf[6](A[0,n][1,4]),
+		'Y'=evalf[6](A[0,n][2,4]),
+		'Z'=evalf[6](A[0,n][3,4])
+	);
+	
+	punkty := [A[0,0][1..3,4], seq(op([A[0,j,'lambda'][1..3,4], A[0,j][1..3,4]]), j=1..n)]; # przygotowanie danych dla wykresu
+	Set('wykres'=generowanie_wykresu(punkty)); # umieszczenie wygenerowanej struktury wykresu w polu wykresu
+end proc:
+
+oblicz_zad_odwrotne := proc()
+	local n, i, x, y, z, 
+		  niewiadome, rownania, rozwiazania, liczba_rozwiazan, 
+		  A:=table(), theta:=table(), lambda:=table(), l:=table(), alpha:=table();
+	
+	n := Get(pole_ilosc_ogniw(value)::posint); # pobranie iloœci ogniw
+	niewiadome:=[0$n]; # pusta lista na niewiadome o rozmiarze n
+	for i from 1 to n do
+		if Get(pole_typ_ogniwa[i](value))="R" then
+			theta[i]		:= evaln(theta[i]);		#niewiadome jako symbole
+			niewiadome[i]	:= theta[i];			#niewiadome jako symbole
+			lambda[i]		:= Get(pole_lambda[i]::algebraic, corrections=true, update=true);
+		else
+			theta[i]		:= Get(pole_theta[i]::algebraic, corrections=true, update=true)*Pi/180;
+			lambda[i]		:= evaln(lambda[i]);	#niewiadome jako symbole
+			niewiadome[i]	:= lambda[i];			#niewiadome jako symbole
+		end if;
+		l[i]				:= Get(pole_l[i]::algebraic, corrections=true, update=true);
+		alpha[i]			:= Get(pole_alpha[i]::algebraic, corrections=true, update=true)*Pi/180;
+		
+		A[i-1,i] := macierzA(theta[i], lambda[i], l[i], alpha[i]); # wyliczanie kolejnych macierzy przejœæ
+	end do;
+	
+	A[0,n] := `.`(A[j-1,j] $ (j=1..n));
+	
+	x := Get(X::algebraic, corrections=true, update=true);
+	y := Get(Y::algebraic, corrections=true, update=true);
+	z := Get(Z::algebraic, corrections=true, update=true);
+	rownania := evalf([x = A[0,n][1,4], y = A[0,n][2,4], z = A[0,n][3,4]]);
+	
+	rozwiazania := RealDomain[solve](rownania, niewiadome, explicit=true); # rozwi¹zywanie równañ w dziedzinie rzeczywistej
+	liczba_rozwiazan := nops(rozwiazania);
+	
+	if liczba_rozwiazan>=1 then
+		for i from 1 to n do
+			Set(J||i=ifelse(Get(pole_typ_ogniwa[i](value))="R", evalf(op(2,rozwiazania[1,i])*180/Pi), evalf(op(2,rozwiazania[1,i]))));
+		end do;
+	else
+		Maplets[Display](Maplet(MessageDialog(caption="Nie znaleziono rozwi¹zañ rzeczywistych!", title="Brak rozwi¹zañ!", type=warning)));
+		return 0;
+	end if;
+	
+	Set(pole_rownan=<rownania>);
+	Set(pole_rozwiazan=<rozwiazania>);
+	oblicz_zad_proste();
+end proc:
+
+zad_odwrotne_maplet := Maplet(
+	onstartup=Action(
+		RunWindow('okno_glowne'),
+		Evaluate(function='zmiana_widocznosci_pol')
+	),
+	
+	Window['okno_glowne'](
+		title="Zadanie proste/odwrotne kinematyki",
+		layout='uklad_interfejsu',
+		defaultbutton='przycisk_zad_proste',
+		resizable=true
+	),
+	
+	BoxLayout['uklad_interfejsu'](
+		inset=5,
+		
+		BoxColumn(
+			inset=0,
+			BoxRow(
+				border=true,
+				BoxCell(Label("Iloœæ ogniw:", halign=right)),
+				BoxCell(DropDownBox['pole_ilosc_ogniw'](value=3, [1,2,3,4,5,6], font=Font("Calibri", bold, 20), background="#e1e1e1", height=40, width=40,
+						onchange=Evaluate(function='zmiana_widocznosci_pol'))),
+				BoxCell(value='stale_wymiary_manipulatora')
+			),
+			BoxRow(
+				border=true,
+				BoxCell(value='wspolrzedne_konfiguracyjne'),
+				BoxColumn(
+					Button['przycisk_zad_proste'](
+						caption=">",
+						font=Font("Arial", bold, 18),
+						width=50,
+						height=30,
+						onclick=Evaluate(function='oblicz_zad_proste')
+					),
+					Button['przycisk_zad_odwrotne'](
+						caption="<",
+						font=Font("Arial", bold, 18),
+						width=50,
+						height=30,
+						onclick=Evaluate(function='oblicz_zad_odwrotne')
+					)
+				),
+				BoxCell(value='wspolrzedne_kartezjanskie')
+			),
+			BoxCell(Label("Pole równañ:")),
+			BoxCell(MathMLViewer['pole_rownan'](fontsize=8,height=100,width=600,wrapped=true)),
+			BoxCell(Label("Pole rozwi¹zañ:")),
+			BoxCell(MathMLViewer['pole_rozwiazan'](fontsize=10,height=100,width=600,wrapped=true))
+		),
+		
+		BoxColumn(
+			border=true,
+			Label(
+				caption="Schemat manipulatora",
+				font=Font("Calibri", bold, 14)
+			),
+			Plotter['wykres'](
+				height=500,
+				width=500
+			)
+		)
+	),
+	
+	GridLayout['stale_wymiary_manipulatora'](
+		inset=1,
+		halign=full,
+		valign=full,
+		GridRow( #naglowki tabeli do wprowadzania danych
+			GridCell(Label("nr\nogniwa",		font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=50), width=1, height=2),
+			GridCell(Label("sta³e dane ogniw",	font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=50), width=4),
+			GridCell(Label("typ\nogniwa",		font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=50), width=1, height=2)
+		),
+		GridRow( #naglowki tabeli do wprowadzania danych
+			GridCell(Label("&theta;",	font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=50)),
+			GridCell(Label("&lambda;",	font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=50)),
+			GridCell(Label("l",			font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=50)),
+			GridCell(Label("&alpha;",	font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=50))
+		),
+		seq(
+			GridRow(
+				GridCell(Label[pole_nr_ogniwa[i]](
+							caption=String(" ",i,"."), font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=40)),
+				GridCell(TextField[pole_theta[i]](
+							value="90", width=5, halign=right)),
+				GridCell(TextField[pole_lambda[i]](
+							value="100", width=5, halign=right)),
+				GridCell(TextField[pole_l[i]](
+							value="20", width=5, halign=right)),
+				GridCell(TextField[pole_alpha[i]](
+							value="90",	width=5, halign=right)),
+				GridCell(DropDownBox[pole_typ_ogniwa[i]](
+							value="R", ["R","T"], font=Font("Calibri", bold, 14), background="#e1e1e1", height=20, width=35,
+							onchange=Evaluate(function='zmiana_widocznosci_pol'), tooltip="Rodzaj pary kinematycznej: R-obrotowa, T-przesuwna"))
+			),
+			i=1..6
+		)
+	),
+	
+	GridLayout['wspolrzedne_konfiguracyjne'](
+		inset=1,
+		halign=full,
+		valign=full,
+		GridRow(
+			GridCell(Label("Wspó³rzêdne konfiguracyjne"), width=4)
+		),
+		GridRow(
+			GridCell(Label['J1_opis']("&theta;1/&lambda;1", height=20, width=60)),
+			GridCell(Button['J1_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J1'='J1-10'), Evaluate(function='oblicz_zad_proste')))),
+			GridCell(TextField['J1'](value="0", width=8, halign=right, editable=true)),
+			GridCell(Button['J1_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J1'='J1+10'), Evaluate(function='oblicz_zad_proste'))))
+		),
+		GridRow(
+			GridCell(Label['J2_opis']("&theta;2/&lambda;2", height=20, width=60)),
+			GridCell(Button['J2_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J2'='J2-10'), Evaluate(function='oblicz_zad_proste')))),
+			GridCell(TextField['J2'](value="0", width=8, halign=right, editable=true)),
+			GridCell(Button['J2_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J2'='J2+10'), Evaluate(function='oblicz_zad_proste'))))
+		),
+		GridRow(
+			GridCell(Label['J3_opis']("&theta;3/&lambda;3", height=20, width=60)),
+			GridCell(Button['J3_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J3'='J3-10'), Evaluate(function='oblicz_zad_proste')))),
+			GridCell(TextField['J3'](value="0", width=8, halign=right, editable=true)),
+			GridCell(Button['J3_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J3'='J3+10'), Evaluate(function='oblicz_zad_proste'))))
+		),
+		GridRow(
+			GridCell(Label['J4_opis']("&theta;4/&lambda;4", height=20, width=60)),
+			GridCell(Button['J4_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J4'='J4-10'), Evaluate(function='oblicz_zad_proste')))),
+			GridCell(TextField['J4'](value="0", width=8, halign=right, editable=true)),
+			GridCell(Button['J4_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J4'='J4+10'), Evaluate(function='oblicz_zad_proste'))))
+		),
+		GridRow(
+			GridCell(Label['J5_opis']("&theta;5/&lambda;5", height=20, width=60)),
+			GridCell(Button['J5_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J5'='J5-10'), Evaluate(function='oblicz_zad_proste')))),
+			GridCell(TextField['J5'](value="0", width=8, halign=right, editable=true)),
+			GridCell(Button['J5_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J5'='J5+10'), Evaluate(function='oblicz_zad_proste'))))
+		),
+		GridRow(
+			GridCell(Label['J6_opis']("&theta;6/&lambda;6", height=20, width=60)),
+			GridCell(Button['J6_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J6'='J6-10'), Evaluate(function='oblicz_zad_proste')))),
+			GridCell(TextField['J6'](value="0", width=8, halign=right, editable=true)),
+			GridCell(Button['J6_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('J6'='J6+10'), Evaluate(function='oblicz_zad_proste'))))
+		)
+	),
+	
+	GridLayout['wspolrzedne_kartezjanskie'](
+		inset=1,
+		halign=full,
+		valign=full,
+		GridRow(
+			GridCell(Label("Wspó³rzêdne kartezjañskie"), width=4)
+		),
+		GridRow(
+			GridCell(Label['X_opis']("x", height=20, width=40)),
+			GridCell(Button['X_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('X'='X-10'), Evaluate(function='oblicz_zad_odwrotne')))),
+			GridCell(TextField['X'](value="60", width=8, halign=right, editable=true)),
+			GridCell(Button['X_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('X'='X+10'), Evaluate(function='oblicz_zad_odwrotne'))))
+		),
+		GridRow(
+			GridCell(Label['Y_opis']("y", height=20, width=40)),
+			GridCell(Button['Y_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('Y'='Y-10'), Evaluate(function='oblicz_zad_odwrotne')))),
+			GridCell(TextField['Y'](value="-100", width=8, halign=right, editable=true)),
+			GridCell(Button['Y_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('Y'='Y+10'), Evaluate(function='oblicz_zad_odwrotne'))))
+		),
+		GridRow(
+			GridCell(Label['Z_opis']("z", height=20, width=40)),
+			GridCell(Button['Z_minus'](caption="-", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('Z'='Z-10'), Evaluate(function='oblicz_zad_odwrotne')))),
+			GridCell(TextField['Z'](value="0", width=8, halign=right, editable=true)),
+			GridCell(Button['Z_plus'](caption="+", font=Font("Calibri", bold, 14), width=40, height=20, onclick=Action(Evaluate('Z'='Z+10'), Evaluate(function='oblicz_zad_odwrotne'))))
+		)
+	)
+):
+Maplets[Display](zad_odwrotne_maplet);	# uruchomienie mapleta
