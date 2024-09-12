@@ -1,0 +1,579 @@
+
+restart:
+with(Maplets[Elements]):
+with(Maplets[Tools]):
+with(plots):
+randomize(): # zainicjalizowanie liczb losowych czasem systemowym
+max_n:=10: # maksymalna iloœæ ogniw
+
+macierzA := proc(theta, lambda, l, alpha) # funkcja zwracaj¹ca macierz przejscia D-H z ukladu i-1 do i
+	return Matrix(4, 4,[
+		[cos(theta), -sin(theta)*cos(alpha), sin(theta)*sin(alpha), l*cos(theta)],
+		[sin(theta), cos(theta)*cos(alpha), -cos(theta)*sin(alpha), l*sin(theta)],
+		[0, sin(alpha), cos(alpha), lambda],
+		[0, 0, 0, 1]
+	]);
+end proc:
+
+widocznosc_pol := proc() # pobiera wybran¹ iloœæ ogniw  i w³¹cza/wy³¹cza dane pola edycyjne
+	local i, j, ile_ogniw;
+	global max_n;
+	ile_ogniw := Get(pole_ilosc_ogniw(value)::posint);
+	for i from 1 to max_n do
+		if i<=ile_ogniw then
+			for j from 0 to 5 do
+				Set(dane[i,j](visible)=true);
+			end do;
+		else
+			for j from 0 to 5 do
+				Set(dane[i,j](visible)=false);
+			end do;
+		end if;
+	end do;
+end proc:
+
+wypelnianie_danymi := proc(szablon_danych::string) # wype³nia pola danymi
+	local ile_ogniw, i;
+	
+	if szablon_danych="reset" then
+		ile_ogniw:=3;
+		for i from 1 to max_n do
+			Set(dane[i,1]=90, dane[i,2]=1000, dane[i,3]=200, dane[i,4]=90);
+		end do;
+		
+	elif szablon_danych="losowo" then
+		ile_ogniw:=Get(pole_ilosc_ogniw(value)::posint);
+		for i from 1 to ile_ogniw do
+			Set(dane[i,1]=rand(-180..180)(), dane[i,2]=rand(0..2000)(), dane[i,3]=rand(0..2000)(), dane[i,4]=rand(-180..180)());
+		end do;
+		
+	elif szablon_danych="SCARA" then
+		ile_ogniw:=4;
+		Set(dane[1,1]=0,	dane[1,2]=240,	dane[1,3]=290,	dane[1,4]=0);
+		Set(dane[2,1]=0,	dane[2,2]=100,	dane[2,3]=260,	dane[2,4]=180);
+		Set(dane[3,1]=0,	dane[3,2]=160,	dane[3,3]=0,	dane[3,4]=180);
+		Set(dane[4,1]=180,	dane[4,2]=0,	dane[4,3]=0,	dane[4,4]=0);
+		
+	elif szablon_danych="PUMA" then
+		ile_ogniw:=6;
+		Set(dane[1,1]=0,	dane[1,2]=660,	dane[1,3]=0,	dane[1,4]=-90);
+		Set(dane[2,1]=0,	dane[2,2]=150,	dane[2,3]=430,	dane[2,4]=180);
+		Set(dane[3,1]=90,	dane[3,2]=150,	dane[3,3]=430,	dane[3,4]=-90);
+		Set(dane[4,1]=0,	dane[4,2]=0,	dane[4,3]=50,	dane[4,4]=90);
+		Set(dane[5,1]=0,	dane[5,2]=0,	dane[5,3]=0,	dane[5,4]=-90);
+		Set(dane[6,1]=0,	dane[6,2]=0,	dane[6,3]=0,	dane[6,4]=0);
+		
+	elif szablon_danych="GMF_S-420F" then
+		ile_ogniw:=6;
+		Set(dane[1,1]=0,	dane[1,2]=0,	dane[1,3]=270,	dane[1,4]=90);
+		Set(dane[2,1]=90,	dane[2,2]=0,	dane[2,3]=900,	dane[2,4]=0);
+		Set(dane[3,1]=0,	dane[3,2]=0,	dane[3,3]=270,	dane[3,4]=90);
+		Set(dane[4,1]=0,	dane[4,2]=1300,	dane[4,3]=0,	dane[4,4]=90);
+		Set(dane[5,1]=180,	dane[5,2]=0,	dane[5,3]=0,	dane[5,4]=90);
+		Set(dane[6,1]=0,	dane[6,2]=260,	dane[6,3]=0,	dane[6,4]=0);
+		
+	else
+		ile_ogniw:=Get(pole_ilosc_ogniw(value)::posint);
+	end if;
+	Set(pole_ilosc_ogniw(value)=ile_ogniw);
+	widocznosc_pol();
+	zad_proste();
+end proc:
+
+przygotowanie_okna_edycji := proc(i) #i - numer ogniwa, ktore bedzie edytowane
+	local j;
+	global ogniwo_edycja;
+	ogniwo_edycja := i;
+	Set(etykieta_okno_edycji(caption)=String("Szybka edycja ogniwa nr ", ogniwo_edycja));
+	for j from 1 to 4 do
+		Set(suwak[j]=trunc(Get(dane[ogniwo_edycja,j]::numeric, corrections=true, update=true))); #aktualizowanie wartoœci suwaka
+	end do;
+end proc:
+
+szybka_edycja := proc(i) #i - numer wspolrzednej (1-theta, 2-lambda, 3-l, 4-alpha)
+	global ogniwo_edycja;
+	Set(dane[ogniwo_edycja,i]=Get(suwak[i](value)::numeric));
+	zad_proste();
+end proc:
+
+orientacjaRPW := proc(B) # liczenie orientacji chwytaka (roll, pitch, yaw - rpw) wzglêdem uk³adu podstawy <0,0,0>
+	local R, P, W, cos_P;
+	cos_P:=sqrt(B[1,1]^2+B[2,1]^2);				# cos(P)
+	P:=arctan(-B[3,1], cos_P);					# k¹t P pitch / beta / obrót wokó³ Y podstawy
+	if cos_P <> 0 then							# sprawdzenie czy cos(P) nie jest równy 0
+		W:=arctan(B[2,1]/cos_P, B[1,1]/cos_P);	# k¹t W yaW / alpha / obrót wokó³ Z podstawy
+		R:= arctan(B[3,2]/cos_P, B[3,3]/cos_P);	# k¹t R Roll / gamma / obrót wokó³ X podstawy
+	elif P > 0 then								# jeœli cos(P)=0 a P>0 tzn. ¿e P=Pi/2
+		W:= 0;
+		R:=arctan(B[1,2], B[2,2]);
+	elif P < 0 then								# jeœli cos(P)=0 a P<0 tzn. ¿e P=-Pi/2
+		W:= 0;
+		R:=-arctan(B[1,2], B[2,2]);
+	end if;
+	return R, P, W;
+end proc:
+
+generowanie_wykresu := proc(punkty)
+	local ilosc_punktow, max_punkt, widok_wykresu;
+	
+	ilosc_punktow := nops(punkty);
+	max_punkt := max(abs(min(punkty)),abs(max(punkty))); # najdalszy punkt - do wyliczenia zakresu widoku wykresu
+	widok_wykresu := [(-max_punkt..max_punkt)$3];
+	
+	return display([
+		pointplot3d( # szkielet manipulatora
+			punkty, # ³¹czenia miêdzy wszystkimi ogniwami
+			title=String("Schemat manipulatora"),
+			labels=["x", "y", "z"],
+			color=black,
+			style=line,
+			linestyle=solid,
+			thickness=3,
+			symbol=solidsphere,
+			symbolsize=15,
+			axes=boxed,
+			axis=[color=blue, location=low, thickness=0, tickmarks],
+			scaling=constrained,
+			view=widok_wykresu,
+			orientation=[245,75,0]
+		),
+		pointplot3d( # ogniwa manipulatora
+			[seq(punkty[i], i=1..ilosc_punktow-1, 2)], # nieparzyste punkty - pary kinematyczne
+			color=red,
+			style=point,
+			symbol=solidsphere,
+			symbolsize=15
+		),
+		pointplot3d( # chwytak/koñcówka manipulatora
+			punkty[ilosc_punktow], # ostatni punkt - chwytak
+			color=red,
+			style=point,
+			symbol=solidsphere,
+			symbolsize=20
+		),
+		plottools[cylinder](punkty[1], max_punkt/5, 0) # pierwszy punkt - podstawa
+	]);
+end proc:
+
+zad_proste := proc()
+	local i, theta, lambda, l, alpha, punkty, r, p, w;
+	global A, n;
+	
+	A[0,0] := Matrix(4, shape=identity); # wyliczenie bazowej macierzy przejœæ (jednostkowa)
+	
+	n := Get(pole_ilosc_ogniw(value)::posint); # pobranie iloœci ogniw
+	for i from 1 to n do # pobieranie danych parametrów dla kolejnych ogniw
+		theta[i]	:= Get(dane[i,1]::numeric, corrections=true, update=true)*Pi/180;
+		lambda[i]	:= Get(dane[i,2]::numeric, corrections=true, update=true);
+		l[i]		:= Get(dane[i,3]::numeric, corrections=true, update=true);
+		alpha[i]	:= Get(dane[i,4]::numeric, corrections=true, update=true)*Pi/180;
+		
+		A[i-1,i] := evalf(macierzA(theta[i], lambda[i], l[i], alpha[i])); # wyliczanie kolejnych macierzy przejœæ
+		A[0,i] := A[0,i-1] . A[i-1,i];
+		A[0,i,'lambda'] := A[0,i-1] . evalf(macierzA(0, lambda[i], 0, 0));
+	end do;
+	
+	r, p, w := orientacjaRPW(A[0,n]); # liczenie orientacji chwytaka (roll, pitch, yaw - rpw) wzglêdem uk³adu podstawy <0,0,0>
+	
+	Set( # wpisanie wartoœci wynikowych do pól (z zaokr¹gleniem)
+		'pole_x'=evalf[6](A[0,n][1,4]),
+		'pole_y'=evalf[6](A[0,n][2,4]),
+		'pole_z'=evalf[6](A[0,n][3,4]),
+		'pole_r'=evalf[6](r*180/Pi),
+		'pole_p'=evalf[6](p*180/Pi),
+		'pole_w'=evalf[6](w*180/Pi)
+	);
+	
+	punkty := [A[0,0][1..3,4], seq(op([A[0,j,'lambda'][1..3,4], A[0,j][1..3,4]]), j=1..n)]; # przygotowanie danych dla wykresu
+	Set('pole_wykresu'=generowanie_wykresu(punkty)); # umieszczenie wygenerowanej struktury wykresu w polu wykresu
+end proc:
+
+kinematyka_manipulatora := Maplet['Maplet_kinematyka_manipulatora'](
+	'onstartup'=Action(
+		RunWindow('window'='okno_glowne'),
+		Evaluate('function'='widocznosc_pol')
+	),
+	
+	(* ---------- OBIEKTY - OKNO GLOWNE ---------- *)
+	Label['etykieta_panel_gorny'](
+		'caption'="Kinematyka manipulatora o n stopniach swobody",
+		'font'=Font("Calibri", bold, 20)
+	),
+	Label['etykieta_panel_lewy'](
+		'caption'="Dane manipulatora",
+		'font'=Font("Calibri", bold, 20)
+	),
+	Label['etykieta_ilosc_ogniw'](
+		'caption'="Iloœæ ogniw manipulatora:",
+		'font'=Font("Calibri", bold, 16)
+	),
+	DropDownBox['pole_ilosc_ogniw'](
+		'onchange'=Evaluate('function'='widocznosc_pol'),
+		'tooltip'="Iloœæ ogniw manipulatora",
+		'width'=50,
+		'height'=30,
+		'font'=Font("Calibri", bold, 16),
+		'value'=3,
+		[seq(1..max_n)]
+	),
+	GridLayout['uklad_tabela_danych'](
+		'inset'=1,
+		'halign'='full',
+		'valign'='full',
+		GridRow(
+			GridCell(Label['etykieta_tabela_danych']('caption'="Wspó³rzêdne konfiguracyjne", 'font'=Font("Calibri", bold, 16), 'height'=40), 'width'=6)
+		),
+		GridRow(
+			GridCell(Label('caption'="---",				'font'=Font("Calibri", bold, 14), 'background'="#e1e1e1", 'height'=20)),
+			GridCell(Label('caption'="&theta; [&deg;]",	'font'=Font("Calibri", bold, 14), 'background'="#e1e1e1", 'height'=20)),
+			GridCell(Label('caption'="&lambda; [mm]",	'font'=Font("Calibri", bold, 14), 'background'="#e1e1e1", 'height'=20)),
+			GridCell(Label('caption'="l [mm]",			'font'=Font("Calibri", bold, 14), 'background'="#e1e1e1", 'height'=20)),
+			GridCell(Label('caption'="&alpha; [&deg;]",	'font'=Font("Calibri", bold, 14), 'background'="#e1e1e1", 'height'=20)),
+			GridCell(Label('caption'="---",				'font'=Font("Calibri", bold, 14), 'background'="#e1e1e1", 'height'=20))
+		),
+		seq(GridRow(
+			GridCell(Label[dane[i,0]]('caption'=String(" ",i,"."), 'font'=Font("Calibri", bold, 14), 'background'="#e1e1e1", 'height'=20, 'width'=40)),
+			GridCell(TextField[dane[i,1]]('value'="90",		'width'=5, 'halign'=right)),
+			GridCell(TextField[dane[i,2]]('value'="1000",	'width'=5, 'halign'=right)),
+			GridCell(TextField[dane[i,3]]('value'="200",	'width'=5, 'halign'=right)),
+			GridCell(TextField[dane[i,4]]('value'="90",		'width'=5, 'halign'=right)),
+			GridCell(
+				Button[dane[i,5]](
+					'caption'=">",
+					'font'=Font("Calibri", bold, 14),
+					'background'="#e1e1e1",
+					'height'=20,
+					'width'=40,
+					'tooltip'=String("Szybka edycja parametrów ogniwa nr ", i),
+					'onclick'=Action(
+						Evaluate('function'='przygotowanie_okna_edycji', Argument('value'=i)),
+						RunWindow('okno_edycji')
+					)
+				)
+			)
+		),i=1..max_n)
+	),
+	Button['przycisk_oblicz'](
+		'caption'="Oblicz",
+		'font'=Font("Calibri", bold, 24),
+		'width'=160,
+		'height'=80,
+		'tooltip'="Oblicza zadanie proste kinematyki manipulatora dla wprowadzonych danych",
+		'onclick'=Evaluate('function'='zad_proste')
+	),
+	Button['przycisk_pokaz_macierze'](
+		'caption'="Macierze\nprzejœæ",
+		'font'=Font("Calibri", bold, 12),
+		'width'=80,
+		'height'=80,
+		'tooltip'="Pokazuje wyliczone macierze przejœæ",
+		'onclick'=Action(
+			Evaluate('pole_macierzy'='ifelse(assigned(A),<seq(String("A[",i-1,",",i,"]")=A[i-1,i], i=1..n)>,"")'), # uzupelnienie macierzy przejsc
+			RunWindow('okno_macierzy')
+		)
+	),
+	Plotter['pole_wykresu'](
+		'height'=500,
+		'width'=500
+	),
+	Label['etykieta_panel_prawy'](
+		'caption'="Wspó³rzêdne wynikowe",
+		'font'=Font("Calibri", bold, 20)
+	),
+	GridLayout['uklad_tabela_wynikow'](
+		'inset'=1,
+		'halign'='full',
+		'valign'='full',
+		GridRow(
+			GridCell(Label['etykieta_pozycja']('caption'="Pozycja", 'font'=Font("Calibri", bold, 16), 'height'=40), 'width'=2)
+		),
+		GridRow(
+			GridCell(Label['etykieta_pole_x']('caption'="X = ", 'font'=Font("Calibri", bold, 16), 'halign'=right, 'height'=20)),
+			GridCell(TextField['pole_x']('value'="", 'font'=Font("Calibri", 16), 'halign'=right, 'width'=10, 'editable'=false, 'background'="#e1e1e1"))
+		),
+		GridRow(
+			GridCell(Label['etykieta_pole_y']('caption'="Y = ", 'font'=Font("Calibri", bold, 16), 'halign'=right, 'height'=20)),
+			GridCell(TextField['pole_y']('value'="", 'font'=Font("Calibri", 16), 'halign'=right, 'width'=10, 'editable'=false, 'background'="#e1e1e1"))
+		),
+		GridRow(
+			GridCell(Label['etykieta_pole_z']('caption'="Z = ", 'font'=Font("Calibri", bold, 16), 'halign'=right, 'height'=20)),
+			GridCell(TextField['pole_z']('value'="", 'font'=Font("Calibri", 16), 'halign'=right, 'width'=10, 'editable'=false, 'background'="#e1e1e1"))
+		),
+		GridRow(
+			GridCell(Label('height'=40), 'width'=2)
+		),
+		GridRow(
+			GridCell(Label['etykieta_orientacja']('caption'="Orientacja", 'font'=Font("Calibri", bold, 16), 'height'=40), 'width'=2)
+		),
+		GridRow(
+			GridCell(Label['etykieta_pole_r']('caption'="R = ", 'font'=Font("Calibri", bold, 16), 'halign'=right, 'height'=20)),
+			GridCell(TextField['pole_r']('value'="", 'font'=Font("Calibri", 16), 'halign'=right, 'width'=10, 'editable'=false, 'background'="#e1e1e1", 'tooltip'="K¹t Roll - obrót wokó³ osi X"))
+		),
+		GridRow(
+			GridCell(Label['etykieta_pole_p']('caption'="P = ", 'font'=Font("Calibri", bold, 16), 'halign'=right, 'height'=20)),
+			GridCell(TextField['pole_p']('value'="", 'font'=Font("Calibri", 16), 'halign'=right, 'width'=10, 'editable'=false, 'background'="#e1e1e1", 'tooltip'="K¹t Pitch - obrót wokó³ osi Y"))
+		),
+		GridRow(
+			GridCell(Label['etykieta_pole_w']('caption'="W = ", 'font'=Font("Calibri", bold, 16), 'halign'=right, 'height'=20)),
+			GridCell(TextField['pole_w']('value'="", 'font'=Font("Calibri", 16), 'halign'=right, 'width'=10, 'editable'=false, 'background'="#e1e1e1", 'tooltip'="K¹t Yaw - obrót wokó³ osi Z"))
+		)
+	),
+	Label['etykieta_panel_dolny'](
+		'caption'="Praca magisterska - Jakub Pasiowiec",
+		'halign'=right,
+		'valign'=bottom,
+		'font'=Font("Calibri", italic, 12)
+	),
+	
+	(* ---------- OBIEKTY - OKNO EDYCJI ---------- *)
+	Label['etykieta_okno_edycji'](
+		'caption'="",
+		'font'=Font("Calibri", bold, 20)
+	),
+	Label['etykieta_theta_okno_edycji'](
+		'caption'="&theta; [&deg;]",
+		'font'=Font("Calibri", bold, 16)
+	),
+	Label['etykieta_lambda_okno_edycji'](
+		'caption'="&lambda; [mm]",
+		'font'=Font("Calibri", bold, 16)
+	),
+	Label['etykieta_l_okno_edycji'](
+		'caption'="l [mm]",
+		'font'=Font("Calibri", bold, 16)
+	),
+	Label['etykieta_alpha_okno_edycji'](
+		'caption'="&alpha; [&deg;]",
+		'font'=Font("Calibri", bold, 16)
+	),
+	Slider['suwak[1]'](
+		'lower'=-180,
+		'upper'=180,
+		'majorticks'=45,
+		'minorticks'=5,
+		'filled'=true,
+		'orientation'='vertical',
+		'onchange'=Evaluate('function'='szybka_edycja', Argument('value'=1)),
+		'background'="#e1e1e1"
+	),
+	Slider['suwak[2]'](
+		'lower'=0,
+		'upper'=2000,
+		'majorticks'=200,
+		'minorticks'=25,
+		'filled'=true,
+		'orientation'='vertical',
+		'onchange'=Evaluate('function'='szybka_edycja', Argument('value'=2)),
+		'background'="#e1e1e1"
+	),
+	Slider['suwak[3]'](
+		'lower'=0,
+		'upper'=2000,
+		'majorticks'=200,
+		'minorticks'=25,
+		'filled'=true,
+		'orientation'='vertical',
+		'onchange'=Evaluate('function'='szybka_edycja', Argument('value'=3)),
+		'background'="#e1e1e1"
+	),
+	Slider['suwak[4]'](
+		'lower'=-180,
+		'upper'=180,
+		'majorticks'=45,
+		'minorticks'=5,
+		'filled'=true,
+		'orientation'='vertical',
+		'onchange'=Evaluate('function'='szybka_edycja', Argument('value'=4)),
+		'background'="#e1e1e1"
+	),
+	Button['przycisk_zamknij_edycje'](
+		'caption'="Zamknij",
+		'onclick'=CloseWindow('okno_edycji')
+	),
+	
+	(* ---------- OBIEKTY - OKNO MACIERZY ---------- *)
+	Label['etykieta_okno_macierzy'](
+		'caption'="Wyliczone macierze przejœæ",
+		'font'=Font("Calibri", bold, 16)
+	),
+	MathMLViewer['pole_macierzy'](
+		'fontsize'=8,
+		'height'=400,
+		'width'=500,
+		'wrapped'=false
+	),
+	Button['przycisk_zamknij_macierze'](
+		'caption'="Zamknij",
+		'onclick'=CloseWindow('okno_macierzy')
+	),
+	
+	(* ---------- UKLADY ---------- *)
+	BorderLayout['uklad_okno_glowne']( #g³ówny layout aplikacji - BorderLayout skladajacy sie z 5 paneli
+		'hgap'=6,
+		'vgap'=3,
+		'inset'=6,
+		GridCell2('constraint'='north',		'value'='uklad_panel_gorny'),
+		GridCell2('constraint'='west',		'value'='uklad_panel_lewy'),
+		GridCell2('constraint'='center',	'value'='uklad_panel_srodkowy'),
+		GridCell2('constraint'='east',		'value'='uklad_panel_prawy'),
+		GridCell2('constraint'='south',		'value'='uklad_panel_dolny')
+	),
+	BoxLayout['uklad_panel_gorny'](
+		BoxRow(
+			BoxCell('value'='etykieta_panel_gorny')
+		)
+	),
+	BoxLayout['uklad_panel_lewy'](
+		'border'=true,
+		BoxColumn(
+			BoxRow(
+				BoxCell('value'='etykieta_panel_lewy')
+			),
+			BoxRow(
+				BoxCell('value'='etykieta_ilosc_ogniw'),
+				BoxCell('value'='pole_ilosc_ogniw')
+			),
+			BoxRow(
+				BoxCell('value'='uklad_tabela_danych')
+			),
+			BoxRow(
+				BoxCell('value'='przycisk_oblicz'),
+				BoxCell('value'='przycisk_pokaz_macierze')
+			)
+		)
+	),
+	BoxLayout['uklad_panel_srodkowy'](
+		'border'=true,
+		'inset'=0,
+		BoxRow(
+			BoxCell('value'='pole_wykresu')
+		)
+	),
+	BoxLayout['uklad_panel_prawy'](
+		'border'=true,
+		BoxColumn(
+			BoxRow(
+				BoxCell('value'='etykieta_panel_prawy')
+			),
+			BoxRow(
+				BoxCell('value'='uklad_tabela_wynikow')
+			)
+		)
+	),
+	BoxLayout['uklad_panel_dolny'](
+		BoxRow(
+			BoxCell('value'='etykieta_panel_dolny')
+		)
+	),
+	
+	BoxLayout['uklad_okno_edycji'](
+		BoxColumn(
+			BoxRow(
+				BoxCell('value'='etykieta_okno_edycji')
+			),
+			BoxRow(
+				BoxColumn(
+					BoxCell('value'='etykieta_theta_okno_edycji'),
+					BoxCell('value'='suwak[1]')
+				),
+				BoxColumn(
+					BoxCell('value'='etykieta_lambda_okno_edycji'),
+					BoxCell('value'='suwak[2]')
+				),
+				BoxColumn(
+					BoxCell('value'='etykieta_l_okno_edycji'),
+					BoxCell('value'='suwak[3]')
+				),
+				BoxColumn(
+					BoxCell('value'='etykieta_alpha_okno_edycji'),
+					BoxCell('value'='suwak[4]')
+				)
+			),
+			BoxRow(
+				BoxCell('value'='przycisk_zamknij_edycje')
+			)
+		)
+	),
+	
+	BoxLayout['uklad_okno_macierzy'](
+		BoxColumn(
+			BoxRow(
+				BoxCell('value'='etykieta_okno_macierzy')
+			),
+			BoxRow(
+				BoxCell('value'='pole_macierzy')
+			),
+			BoxRow(
+				BoxCell('value'='przycisk_zamknij_macierze')
+			)
+		)
+	),
+	
+	(* ---------- PASEK MENU ---------- *)
+	MenuBar['menu_okno_glowne'](
+		Menu(
+			'caption'="Plik",
+			MenuItem(
+				'caption'="Zamknij",
+				'onclick'=Shutdown()
+			)
+		),
+		Menu(
+			'caption'="Dane",
+			MenuItem(
+				'caption'="Zresetuj",
+				'onclick'=Evaluate('function'='wypelnianie_danymi', Argument('value'="reset"))
+			),
+			MenuItem(
+				'caption'="WprowadŸ losowe",
+				'onclick'=Evaluate('function'='wypelnianie_danymi', Argument('value'="losowo"))
+			)
+		),
+		Menu(
+			'caption'="Szablony danych",
+			MenuItem(
+				'caption'="Manipulator SCARA",
+				'onclick'=Evaluate('function'='wypelnianie_danymi', Argument('value'="SCARA"))
+			),
+			MenuSeparator(),
+			MenuItem(
+				'caption'="Manipulator PUMA 560",
+				'onclick'=Evaluate('function'='wypelnianie_danymi', Argument('value'="PUMA"))
+			),
+			MenuSeparator(),
+			MenuItem(
+				'caption'="Manipulator Robota GMF S-420F",
+				'onclick'=Evaluate('function'='wypelnianie_danymi', Argument('value'="GMF_S-420F"))
+			)
+		)
+	),
+	
+	(* ---------- OKNA MAPLETA ---------- *)
+	Window['okno_glowne'](
+		'title'="Maplet - Kinematyka manipulatora",
+		'layout'='uklad_okno_glowne',
+		'resizable'=true,
+		'defaultbutton'='przycisk_oblicz',
+		'menubar'='menu_okno_glowne'
+	),
+	Window['okno_edycji'](
+		'title'="Szybka edycja",
+		'layout'='uklad_okno_edycji',
+		'resizable'=false,
+		'defaultbutton'='przycisk_zamknij_edycje',
+		'height'=400,
+		'width'=300,
+		'xcoord'=100,
+		'ycoord'=100
+	),
+	Window['okno_macierzy'](
+		'title'="Macierze przejœcia",
+		'layout'='uklad_okno_macierzy',
+		'resizable'=true,
+		'defaultbutton'='przycisk_zamknij_macierze',
+		'xcoord'=100,
+		'ycoord'=100
+	)
+):
+
+Maplets[Display](kinematyka_manipulatora);	# uruchomienie mapleta
